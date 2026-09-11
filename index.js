@@ -12,21 +12,27 @@ const AutoAuth = require('mineflayer-auto-auth');
 const { pathfinder, Movements } = require('mineflayer-pathfinder');
 
 const app = express();
-app.use(express.json());
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '32kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 let bot = null;
 let activeMode = 'idle';
 let reconnectTimer = null;
 let reconnectAttempts = 0;
+let reconnectEnabled = true;
+let lastConnectOptions = null;
 const logs = [];
+
+const allowedModes = new Set([
+  'mine', 'diamond', 'iron', 'stripmine', 'build', 'eat', 'cleanup',
+  'store', 'patrol', 'explore', 'afk', 'stop'
+]);
+
 const agentState = {
   homeBase: null,
   homeBuildAttempted: false,
-  setHomeBase(value) { this.homeBase = value; },
-  gatherHomeMaterials: async () => {},
-  ensureCraftingTable: async () => {},
-  craftItem: async () => {}
+  setHomeBase(value) { this.homeBase = value; }
 };
 
 function addLog(module, message) {
@@ -36,21 +42,53 @@ function addLog(module, message) {
   logging.log(module, message);
 }
 
+function normalizePort(value, fallback = 25565) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return fallback;
+  return port;
+}
+
+function runtimeServerSettings(body = {}) {
+  const host = body.host ? String(body.host).trim() : settings.minecraft.host;
+  const port = normalizePort(body.port, settings.minecraft.port);
+  const username = body.username ? String(body.username).trim() : settings.minecraft.username;
+
+  if (!host) throw new Error('Minecraft host is required');
+  if (!username) throw new Error('Minecraft username is required');
+
+  settings.minecraft.host = host;
+  settings.minecraft.port = port;
+  settings.minecraft.username = username;
+  return settings.minecraft;
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function destroyBot(reason = 'reconnecting') {
+  clearReconnectTimer();
+  if (!bot) return;
+  const current = bot;
+  bot = null;
+  try { current.quit(reason); } catch (_) {}
+  try { current.pathfinder?.setGoal(null); } catch (_) {}
+}
+
 function createBot(options = settings.minecraft) {
-  if (bot) {
-    try { bot.quit('reconnecting'); } catch (_) {}
-  }
+  destroyBot('recreating connection');
 
   const botOptions = {
-    host: options.host,
-    port: Number(options.port),
-    username: options.username,
+    host: String(options.host),
+    port: normalizePort(options.port),
+    username: String(options.username),
     auth: options.auth,
     version: options.version || undefined,
-    hideErrors: options.hideErrors
+    hideErrors: Boolean(options.hideErrors),
+    checkTimeoutInterval: 60000
   };
 
-  // AutoAuth handles common AuthMe/registration-login chat flows on offline servers.
   if (settings.autoAuth.enabled && settings.autoAuth.password && settings.autoAuth.password !== 'CHANGE_ME') {
     botOptions.plugins = [AutoAuth];
     botOptions.AutoAuth = {
@@ -61,30 +99,42 @@ function createBot(options = settings.minecraft) {
   }
 
   bot = mineflayer.createBot(botOptions);
+  lastConnectOptions = { ...options, port: botOptions.port };
   bot.loadPlugin(pathfinder);
   bot.defaultMovements = new Movements(bot);
 
   bot.once('spawn', () => {
     reconnectAttempts = 0;
-    addLog('Bot', `Connected to ${options.host}:${options.port} as ${options.username}`);
+    activeMode = 'idle';
+    addLog('Bot', `Connected to ${options.host}:${botOptions.port} as ${options.username}`);
   });
+
   bot.on('serverAuth', () => addLog('Auth', 'Server authentication completed automatically'));
   bot.on('chat', (username, message) => addLog('Chat', `${username}: ${message}`));
+  bot.on('health', () => {
+    if (bot && bot.food !== undefined && bot.food <= 6) addLog('Bot', `Low food level: ${bot.food}`);
+  });
   bot.on('kicked', reason => addLog('Bot', `Kicked: ${String(reason)}`));
   bot.on('error', err => addLog('Bot', `Error: ${err.message}`));
   bot.on('end', () => {
     addLog('Bot', 'Connection closed');
-    bot = null;
+    if (bot && bot === currentBot) bot = null;
     activeMode = 'idle';
-    if (settings.minecraft.autoReconnect) scheduleReconnect();
+    if (reconnectEnabled && settings.minecraft.autoReconnect) scheduleReconnect();
   });
-  return bot;
+
+  const currentBot = bot;
+  return currentBot;
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return;
+  if (reconnectTimer || !reconnectEnabled) return;
   const max = settings.minecraft.maxReconnectAttempts;
-  if (max > 0 && reconnectAttempts >= max) return;
+  if (max > 0 && reconnectAttempts >= max) {
+    addLog('Bot', `Reconnect limit reached (${max})`);
+    return;
+  }
+
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     reconnectAttempts += 1;
@@ -94,6 +144,7 @@ function scheduleReconnect() {
 }
 
 async function connectBot() {
+  reconnectEnabled = true;
   if (bot) return bot;
   return createBot(settings.minecraft);
 }
@@ -104,31 +155,51 @@ function requireBot() {
 }
 
 async function runMode(mode, args = []) {
+  const normalizedMode = String(mode || 'stop').trim().toLowerCase();
+  if (!allowedModes.has(normalizedMode)) throw new Error(`Unknown mode: ${normalizedMode}`);
+
   const currentBot = requireBot();
-  activeMode = mode;
-  addLog('Mode', `Starting ${mode}`);
+  activeMode = normalizedMode;
+  addLog('Mode', `Starting ${normalizedMode}`);
+
   try {
-    switch (mode) {
+    switch (normalizedMode) {
       case 'mine': return await mining.mineResources(currentBot);
       case 'diamond': return await mining.mineDiamond(currentBot, Number(args[0] || 3));
       case 'iron': return await mining.mineIron(currentBot, Number(args[0] || 3));
       case 'stripmine': return await mining.stripmineAtYLevel(currentBot);
-      case 'build': return await building.buildHomeBase(currentBot, agentState.homeBase, agentState.homeBuildAttempted, agentState.setHomeBase, agentState.gatherHomeMaterials, agentState.ensureCraftingTable, agentState.craftItem);
+      case 'build': return await building.buildHomeBase(
+        currentBot,
+        agentState.homeBase,
+        agentState.homeBuildAttempted,
+        agentState.setHomeBase,
+        agentState.gatherHomeMaterials,
+        agentState.ensureCraftingTable,
+        agentState.craftItem
+      );
       case 'eat': return await inventory.eatFood(currentBot);
       case 'cleanup': return await inventory.batchCleanup(currentBot);
       case 'store': return await inventory.storeItems(currentBot);
       case 'patrol': {
         const origin = currentBot.entity.position;
-        for (const [dx, dz] of [[8,0],[0,8],[-8,0],[0,-8]]) {
-          await movement.moveTo(currentBot, { x: Math.floor(origin.x + dx), y: Math.floor(origin.y), z: Math.floor(origin.z + dz) }, { timeout: 30000 });
+        for (const [dx, dz] of [[8, 0], [0, 8], [-8, 0], [0, -8]]) {
+          await movement.moveTo(currentBot, {
+            x: Math.floor(origin.x + dx),
+            y: Math.floor(origin.y),
+            z: Math.floor(origin.z + dz)
+          }, { timeout: 30000 });
         }
-        return { success: true };
+        return { success: true, mode: 'patrol' };
       }
       case 'explore': {
         const origin = currentBot.entity.position;
-        const distance = Number(args[0] || 24);
-        const [dx, dz] = [[1,0],[0,1],[-1,0],[0,-1]][Math.floor(Math.random() * 4)];
-        return await movement.moveTo(currentBot, { x: Math.floor(origin.x + dx * distance), y: Math.floor(origin.y), z: Math.floor(origin.z + dz * distance) }, { timeout: 45000 });
+        const distance = Math.max(8, Math.min(256, Number(args[0] || 24)));
+        const [dx, dz] = [[1, 0], [0, 1], [-1, 0], [0, -1]][Math.floor(Math.random() * 4)];
+        return await movement.moveTo(currentBot, {
+          x: Math.floor(origin.x + dx * distance),
+          y: Math.floor(origin.y),
+          z: Math.floor(origin.z + dz * distance)
+        }, { timeout: 45000 });
       }
       case 'afk':
         activeMode = 'afk';
@@ -138,10 +209,11 @@ async function runMode(mode, args = []) {
         activeMode = 'idle';
         return { success: true, mode: 'idle' };
       default:
-        throw new Error(`Unknown mode: ${mode}`);
+        throw new Error(`Unknown mode: ${normalizedMode}`);
     }
   } catch (err) {
-    addLog('Mode', `${mode} failed: ${err.message}`);
+    addLog('Mode', `${normalizedMode} failed: ${err.message}`);
+    activeMode = 'idle';
     throw err;
   }
 }
@@ -184,37 +256,52 @@ app.get('/api/status', (req, res) => {
 
 app.post('/api/connect', async (req, res) => {
   try {
-    if (req.body?.host) settings.minecraft.host = String(req.body.host);
-    if (req.body?.port) settings.minecraft.port = Number(req.body.port);
-    if (req.body?.username) settings.minecraft.username = String(req.body.username);
+    reconnectEnabled = true;
+    runtimeServerSettings(req.body || {});
+    clearReconnectTimer();
+    if (bot) destroyBot('manual reconnect');
     await connectBot();
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ success: true, server: publicServerSettings() });
+  } catch (err) {
+    addLog('Web', `Connect failed: ${err.message}`);
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/disconnect', (req, res) => {
-  try { if (bot) bot.quit('manual disconnect'); } catch (_) {}
-  bot = null;
+  reconnectEnabled = false;
+  clearReconnectTimer();
+  destroyBot('manual disconnect');
   activeMode = 'idle';
   res.json({ success: true });
 });
 
 app.post('/api/reconnect', async (req, res) => {
-  try { if (bot) bot.quit('manual reconnect'); } catch (_) {}
-  bot = null;
-  try { await connectBot(); res.json({ success: true }); } catch (err) { res.status(500).json({ error: err.message }); }
+  try {
+    reconnectEnabled = true;
+    clearReconnectTimer();
+    destroyBot('manual reconnect');
+    await connectBot();
+    res.json({ success: true });
+  } catch (err) {
+    addLog('Web', `Reconnect failed: ${err.message}`);
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/mode', async (req, res) => {
-  try { res.json({ success: true, result: await runMode(String(req.body.mode || 'stop'), req.body.args || []) }); }
-  catch (err) { res.status(400).json({ error: err.message }); }
+  try {
+    res.json({ success: true, result: await runMode(req.body?.mode, req.body?.args || []) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/cli', async (req, res) => {
-  const { cmd, args } = req.body;
+  const { cmd, args } = req.body || {};
   try {
     if (cmd === 'connect') await connectBot();
-    else if (['mine', 'diamond', 'iron', 'stripmine', 'build', 'eat', 'cleanup', 'store', 'patrol', 'explore', 'afk', 'stop'].includes(cmd)) await runMode(cmd, args || []);
+    else if (allowedModes.has(String(cmd || '').toLowerCase())) await runMode(cmd, args || []);
     else await cli.runCLICommand(cmd, args, bot, agentState);
     res.json({ message: 'Command executed.' });
   } catch (err) {
@@ -224,16 +311,42 @@ app.post('/cli', async (req, res) => {
 });
 
 app.get('/api/settings', (req, res) => {
-  res.json({ minecraft: publicServerSettings(), autoAuth: { enabled: settings.autoAuth.enabled }, web: settings.web, agent: settings.agent });
+  res.json({
+    minecraft: publicServerSettings(),
+    autoAuth: { enabled: settings.autoAuth.enabled },
+    web: settings.web,
+    agent: settings.agent,
+    runtime: { nodeVersion: process.version, pid: process.pid, platform: process.platform }
+  });
+});
+
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ ok: true, botConnected: Boolean(bot?.entity) });
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(settings.web.port, settings.web.host, () => {
+const server = app.listen(settings.web.port, settings.web.host, () => {
   addLog('Server', `Dashboard listening on ${settings.web.host}:${settings.web.port}`);
   if (settings.minecraft.autoConnect && settings.minecraft.host !== 'YOUR_SERVER_IP') {
     connectBot().catch(err => addLog('Bot', `Auto-connect failed: ${err.message}`));
   }
 });
 
-module.exports = { createBot, connectBot, runMode };
+server.on('error', err => addLog('Server', `HTTP server error: ${err.message}`));
+
+process.on('SIGTERM', () => {
+  reconnectEnabled = false;
+  clearReconnectTimer();
+  destroyBot('process shutdown');
+  server.close(() => process.exit(0));
+});
+
+process.on('SIGINT', () => {
+  reconnectEnabled = false;
+  clearReconnectTimer();
+  destroyBot('process shutdown');
+  server.close(() => process.exit(0));
+});
+
+module.exports = { createBot, connectBot, runMode, publicServerSettings };
