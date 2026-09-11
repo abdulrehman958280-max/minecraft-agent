@@ -12,7 +12,8 @@ module.exports = {
     hideErrors: false,
     autoConnect: process.env.MC_AUTO_CONNECT !== 'false',
     autoReconnect: process.env.MC_AUTO_RECONNECT !== 'false',
-    reconnectDelay: Number(process.env.MC_RECONNECT_DELAY || 5000)
+    reconnectDelay: Number(process.env.MC_RECONNECT_DELAY || 5000),
+    maxReconnectAttempts: Number(process.env.MC_MAX_RECONNECT_ATTEMPTS || 0)
   },
 
   web: {
@@ -21,6 +22,7 @@ module.exports = {
   },
 
   agent: {
-    logLimit: Number(process.env.LOG_LIMIT || 200)
+    logLimit: Number(process.env.LOG_LIMIT || 200),
+    uiTitle: process.env.UI_TITLE || 'Minecraft Agent'
   }
 };
