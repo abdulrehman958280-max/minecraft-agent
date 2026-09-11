@@ -23,7 +23,7 @@ module.exports = {
     full: 30
   },
   timeouts: {
-    homeBuild: 2 * 60 * 1000 // 2 minutes
+    homeBuild: 2 * 60 * 1000
   },
   fallbackBlocks: ['dirt', 'sand', 'gravel', 'andesite', 'granite', 'diorite', 'netherrack', 'end_stone'],
   mining: {
@@ -31,4 +31,4 @@ module.exports = {
     branchSpacing: 2,
     numBranches: 6
   }
-}; 
+};
