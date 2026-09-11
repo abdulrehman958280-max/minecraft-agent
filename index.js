@@ -8,6 +8,7 @@ const logging = require('./logging');
 const cli = require('./cli');
 const settings = require('./settings');
 const mineflayer = require('mineflayer');
+const AutoAuth = require('mineflayer-auto-auth');
 const { pathfinder, Movements } = require('mineflayer-pathfinder');
 
 const app = express();
@@ -39,20 +40,35 @@ function createBot(options = settings.minecraft) {
   if (bot) {
     try { bot.quit('reconnecting'); } catch (_) {}
   }
-  bot = mineflayer.createBot({
+
+  const botOptions = {
     host: options.host,
     port: Number(options.port),
     username: options.username,
     auth: options.auth,
     version: options.version || undefined,
     hideErrors: options.hideErrors
-  });
+  };
+
+  // AutoAuth handles common AuthMe/registration-login chat flows on offline servers.
+  if (settings.autoAuth.enabled && settings.autoAuth.password && settings.autoAuth.password !== 'CHANGE_ME') {
+    botOptions.plugins = [AutoAuth];
+    botOptions.AutoAuth = {
+      password: settings.autoAuth.password,
+      logging: settings.autoAuth.logging,
+      ignoreRepeat: settings.autoAuth.ignoreRepeat
+    };
+  }
+
+  bot = mineflayer.createBot(botOptions);
   bot.loadPlugin(pathfinder);
   bot.defaultMovements = new Movements(bot);
+
   bot.once('spawn', () => {
     reconnectAttempts = 0;
     addLog('Bot', `Connected to ${options.host}:${options.port} as ${options.username}`);
   });
+  bot.on('serverAuth', () => addLog('Auth', 'Server authentication completed automatically'));
   bot.on('chat', (username, message) => addLog('Chat', `${username}: ${message}`));
   bot.on('kicked', reason => addLog('Bot', `Kicked: ${String(reason)}`));
   bot.on('error', err => addLog('Bot', `Error: ${err.message}`));
@@ -130,12 +146,27 @@ async function runMode(mode, args = []) {
   }
 }
 
+function publicServerSettings() {
+  return {
+    host: settings.minecraft.host,
+    port: settings.minecraft.port,
+    username: settings.minecraft.username,
+    auth: settings.minecraft.auth,
+    version: settings.minecraft.version,
+    autoConnect: settings.minecraft.autoConnect,
+    autoReconnect: settings.minecraft.autoReconnect,
+    reconnectDelay: settings.minecraft.reconnectDelay,
+    maxReconnectAttempts: settings.minecraft.maxReconnectAttempts,
+    autoAuthEnabled: settings.autoAuth.enabled
+  };
+}
+
 app.get('/api/status', (req, res) => {
   res.json({
     connected: Boolean(bot?.entity),
     spawned: Boolean(bot?.entity),
     mode: activeMode,
-    server: settings.minecraft,
+    server: publicServerSettings(),
     player: bot?.entity?.position ? {
       username: bot.username,
       health: bot.health,
@@ -193,7 +224,7 @@ app.post('/cli', async (req, res) => {
 });
 
 app.get('/api/settings', (req, res) => {
-  res.json({ minecraft: settings.minecraft, web: settings.web, agent: settings.agent });
+  res.json({ minecraft: publicServerSettings(), autoAuth: { enabled: settings.autoAuth.enabled }, web: settings.web, agent: settings.agent });
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
