@@ -21,7 +21,6 @@ let activeMode = 'idle';
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let reconnectEnabled = true;
-let lastConnectOptions = null;
 const logs = [];
 
 const allowedModes = new Set([
@@ -68,15 +67,15 @@ function clearReconnectTimer() {
 }
 
 function destroyBot(reason = 'reconnecting') {
-  clearReconnectTimer();
   if (!bot) return;
-  const current = bot;
+  const currentBot = bot;
   bot = null;
-  try { current.quit(reason); } catch (_) {}
-  try { current.pathfinder?.setGoal(null); } catch (_) {}
+  try { currentBot.pathfinder?.setGoal(null); } catch (_) {}
+  try { currentBot.quit(reason); } catch (_) {}
 }
 
 function createBot(options = settings.minecraft) {
+  clearReconnectTimer();
   destroyBot('recreating connection');
 
   const botOptions = {
@@ -98,33 +97,29 @@ function createBot(options = settings.minecraft) {
     };
   }
 
-  bot = mineflayer.createBot(botOptions);
-  lastConnectOptions = { ...options, port: botOptions.port };
-  bot.loadPlugin(pathfinder);
-  bot.defaultMovements = new Movements(bot);
+  const createdBot = mineflayer.createBot(botOptions);
+  bot = createdBot;
+  createdBot.loadPlugin(pathfinder);
+  createdBot.defaultMovements = new Movements(createdBot);
 
-  bot.once('spawn', () => {
+  createdBot.once('spawn', () => {
     reconnectAttempts = 0;
     activeMode = 'idle';
     addLog('Bot', `Connected to ${options.host}:${botOptions.port} as ${options.username}`);
   });
 
-  bot.on('serverAuth', () => addLog('Auth', 'Server authentication completed automatically'));
-  bot.on('chat', (username, message) => addLog('Chat', `${username}: ${message}`));
-  bot.on('health', () => {
-    if (bot && bot.food !== undefined && bot.food <= 6) addLog('Bot', `Low food level: ${bot.food}`);
-  });
-  bot.on('kicked', reason => addLog('Bot', `Kicked: ${String(reason)}`));
-  bot.on('error', err => addLog('Bot', `Error: ${err.message}`));
-  bot.on('end', () => {
+  createdBot.on('serverAuth', () => addLog('Auth', 'Server authentication completed automatically'));
+  createdBot.on('chat', (username, message) => addLog('Chat', `${username}: ${message}`));
+  createdBot.on('kicked', reason => addLog('Bot', `Kicked: ${String(reason)}`));
+  createdBot.on('error', err => addLog('Bot', `Error: ${err.message}`));
+  createdBot.on('end', () => {
     addLog('Bot', 'Connection closed');
-    if (bot && bot === currentBot) bot = null;
+    if (bot === createdBot) bot = null;
     activeMode = 'idle';
     if (reconnectEnabled && settings.minecraft.autoReconnect) scheduleReconnect();
   });
 
-  const currentBot = bot;
-  return currentBot;
+  return createdBot;
 }
 
 function scheduleReconnect() {
@@ -259,7 +254,7 @@ app.post('/api/connect', async (req, res) => {
     reconnectEnabled = true;
     runtimeServerSettings(req.body || {});
     clearReconnectTimer();
-    if (bot) destroyBot('manual reconnect');
+    destroyBot('manual reconnect');
     await connectBot();
     res.json({ success: true, server: publicServerSettings() });
   } catch (err) {
@@ -349,4 +344,11 @@ process.on('SIGINT', () => {
   server.close(() => process.exit(0));
 });
 
-module.exports = { createBot, connectBot, runMode, publicServerSettings };
+function __testOnlyClose() {
+  reconnectEnabled = false;
+  clearReconnectTimer();
+  destroyBot('test shutdown');
+  server.close();
+}
+
+module.exports = { createBot, connectBot, runMode, publicServerSettings, __testOnlyClose };
