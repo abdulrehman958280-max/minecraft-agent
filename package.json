@@ -1,18 +1,20 @@
 {
-  "name": "mcp_js_server",
-  "version": "1.0.0",
+  "name": "minecraft-agent",
+  "version": "1.1.1",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "test": "node --test test/runtime-config.test.js && node --check index.js mining.js building.js movement.js inventory.js cli.js settings.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["minecraft", "mineflayer", "bot", "afk", "automation"],
   "license": "ISC",
-  "description": "",
+  "description": "A modular Mineflayer Minecraft agent with deterministic automation and web control.",
+  "engines": { "node": ">=18" },
   "dependencies": {
     "debug": "^4.4.1",
     "express": "^4.19.2",
     "mineflayer": "^4.29.0",
+    "mineflayer-auto-auth": "^1.11.1",
     "mineflayer-collectblock": "^1.4.1",
     "mineflayer-pathfinder": "^2.4.5",
     "mineflayer-pvp": "^1.3.2"
