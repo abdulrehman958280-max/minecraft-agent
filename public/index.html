@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minecraft Agent</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar soft-card">
+      <div><p class="eyebrow">AUTONOMOUS CONTROL</p><h1>Minecraft Agent</h1><p class="sub">Lightweight no-LLM dashboard for bot control and monitoring.</p></div>
+      <div class="status-pill"><span id="statusDot"></span><span id="statusText">Offline</span></div>
+    </header>
+
+    <section class="grid stats">
+      <article class="soft-card stat"><span>Health</span><strong id="health">—</strong></article>
+      <article class="soft-card stat"><span>Food</span><strong id="food">—</strong></article>
+      <article class="soft-card stat"><span>Position</span><strong id="position">—</strong></article>
+      <article class="soft-card stat"><span>Mode</span><strong id="mode">idle</strong></article>
+    </section>
+
+    <section class="grid two">
+      <article class="soft-card panel">
+        <div class="panel-head"><div><h2>Connection</h2><p>Configure and control the Minecraft connection.</p></div></div>
+        <div class="form-grid">
+          <label>Host<input id="host" placeholder="play.example.com"></label>
+          <label>Port<input id="port" type="number" value="25565"></label>
+          <label>Username<input id="username" placeholder="MinecraftAgent"></label>
+        </div>
+        <div class="actions">
+          <button class="green" data-action="connect">Connect</button>
+          <button class="green" data-action="reconnect">Reconnect</button>
+          <button class="ghost" data-action="disconnect">Disconnect</button>
+        </div>
+      </article>
+
+      <article class="soft-card panel">
+        <div class="panel-head"><div><h2>Modes</h2><p>Run a deterministic bot routine.</p></div></div>
+        <div class="mode-grid">
+          <button class="green" data-mode="afk">AFK</button>
+          <button class="green" data-mode="mine">Mine</button>
+          <button class="green" data-mode="diamond">Diamond</button>
+          <button class="green" data-mode="iron">Iron</button>
+          <button class="green" data-mode="stripmine">Strip Mine</button>
+          <button class="green" data-mode="explore">Explore</button>
+          <button class="green" data-mode="patrol">Patrol</button>
+          <button class="green" data-mode="build">Build Home</button>
+          <button class="green" data-mode="eat">Eat</button>
+          <button class="green" data-mode="cleanup">Cleanup</button>
+          <button class="green" data-mode="store">Store</button>
+          <button class="danger" data-mode="stop">Stop</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="soft-card panel"><div class="panel-head"><div><h2>Inventory</h2><p>Current carried items.</p></div></div><div id="inventory" class="inventory"></div></article>
+      <article class="soft-card panel"><div class="panel-head"><div><h2>Live Logs</h2><p>Recent bot events.</p></div><button class="ghost small" id="refresh">Refresh</button></div><pre id="logs">Waiting for bot events…</pre></article>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
