@@ -9,39 +9,39 @@ A modular Mineflayer Minecraft bot with deterministic gameplay modes and a light
 - Build a simple protected home structure
 - Eat food automatically from inventory
 - Drop common trash and store non-food items in a nearby chest/barrel
-- Auto-connect and auto-reconnect
+- Auto-connect and auto-reconnect with bounded retries
+- Runtime connection changes from the dashboard
 - Live health, food, position, inventory and logs in the web dashboard
 - Remote mode control over HTTP
-- Node.js hosting support through `PORT`
+- Node.js hosting support through `PORT` on `0.0.0.0`
+- Health endpoint at `/healthz` for hosted deployments
+- AuthMe-like server chat authentication through `mineflayer-auto-auth`
 
 ## Setup
 
 ```sh
 npm install
-```
-
-Edit `settings.js`:
-
-```js
-minecraft: {
-  host: 'your.server.address',
-  port: 25565,
-  username: 'MinecraftAgent',
-  auth: 'offline'
-}
-```
-
-Start the server:
-
-```sh
 npm start
 ```
 
-Open the dashboard at `http://localhost:3000` (or the URL/port supplied by your Node.js host).
+The web server reads the platform-provided `PORT` when present and binds to `WEB_HOST` (default `0.0.0.0`). This means hosts such as Render, Railway, Fly.io, and similar Node.js platforms can expose the dashboard without hardcoding a web port.
 
-### Environment variables
+Edit `settings.js` or provide environment variables:
 
-`MC_HOST`, `MC_PORT`, `MC_USERNAME`, `MC_AUTH`, `MC_VERSION`, `MC_AUTO_CONNECT`, `MC_AUTO_RECONNECT`, `MC_RECONNECT_DELAY`, `MC_MAX_RECONNECT_ATTEMPTS`, `PORT`, `WEB_PORT`, `WEB_HOST`, `LOG_LIMIT`, and `UI_TITLE` can override `settings.js` defaults.
+```text
+MC_HOST=your.server.address
+MC_PORT=25565
+MC_USERNAME=MinecraftAgent
+MC_AUTH=offline
+MC_PASSWORD=your_authme_password
+AUTO_AUTH_ENABLED=true
+PORT=3000
+WEB_HOST=0.0.0.0
+```
+
+The AutoAuth password is kept server-side and is never included in `/api/status` or `/api/settings` responses.
+
+Open the dashboard at the URL supplied by your Node.js host. Locally, use `http://localhost:3000` when `PORT=3000`.
 
 ## Dashboard modes
 
@@ -61,9 +61,13 @@ Open the dashboard at `http://localhost:3000` (or the URL/port supplied by your 
 
 `GET /api/status` returns connection state, active mode, player stats, inventory and logs.
 
-`POST /api/connect` accepts `{ "host", "port", "username" }`.
+`GET /api/settings` returns non-secret runtime settings and Node.js runtime information.
 
-`POST /api/disconnect` disconnects the bot.
+`GET /healthz` returns a simple hosting health check.
+
+`POST /api/connect` accepts `{ "host", "port", "username" }` and reconnects when an existing session is active.
+
+`POST /api/disconnect` disconnects the bot and disables automatic reconnect until a new connection is requested.
 
 `POST /api/reconnect` reconnects using configured settings.
 
@@ -73,7 +77,7 @@ The legacy `POST /cli` endpoint remains available for compatible CLI commands.
 
 ## Notes
 
-Minecraft versions, server authentication, and anti-cheat behavior can affect which actions succeed in a live server. Gameplay actions should be tested on the target server before unattended use.
+Minecraft versions, server authentication, and anti-cheat behavior can affect which actions succeed in a live server. The bot is intended to behave like a normal gameplay automation client, not to evade anti-bot or anti-cheat detection. Test gameplay actions on the target server before unattended use.
 
 ## License
 ISC
