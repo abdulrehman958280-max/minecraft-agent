@@ -1,14 +1,15 @@
 {
-  "name": "mcp_js_server",
-  "version": "1.0.0",
+  "name": "minecraft-agent",
+  "version": "1.1.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "test": "node --check index.js mining.js movement.js building.js inventory.js cli.js logging.js settings.js"
   },
-  "keywords": [],
+  "keywords": ["minecraft", "mineflayer", "bot", "agent"],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "A modular Mineflayer Minecraft agent with autonomous modes and a web dashboard.",
   "dependencies": {
     "debug": "^4.4.1",
     "express": "^4.19.2",
